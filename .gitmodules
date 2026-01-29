@@ -1,0 +1,3 @@
+[submodule "models/sgg"]
+	path = models/sgg
+	url = https://github.com/Maelic/SGG-Benchmark.git
