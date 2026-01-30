@@ -22,7 +22,9 @@ sgg_config:
   predictor: "REACTPredictor"
   yolo_model: "models/sgg/checkpoint/yolov8m_vg150.pt"
   config_file: "models/sgg/configs/VG150/react_yolov8m.yaml"
-  pretrained_ckpt: "models/sgg/checkpoint/react_PSG/best_model_epoch_11.pth"
+  pretrained_ckpt: "models/sgg/checkpoint/react_VG150/best_model_epoch_9.pth"
+  rel_conf: 0.1
+  box_conf: 0.3
 
 temporal_encoder_config:
   num_layers: 4

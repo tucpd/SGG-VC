@@ -22,6 +22,8 @@ def parse_args():
     parser.add_argument('--resume', type=str, default=None, help='Path to resume checkpoint')
     parser.add_argument('--freeze_sgg', action='store_true', default=True, help='Freeze SGG module (YOLO + REACT)')
     parser.add_argument('--dataset', type=str, default='msrvtt', help='Dataset name: msrvtt or classroom')
+    parser.add_argument('--video_dir', type=str, default=None, help='Path to video directory')
+    parser.add_argument('--annotation_file', type=str, default=None, help='Path to annotation JSON file')
     return parser.parse_args()
 
 def load_config(config_path):
@@ -38,6 +40,11 @@ def main(args):
         config['training']['batch_size'] = args.batch_size
     if args.epochs is not None:
         config['training']['epochs'] = args.epochs
+    # Override dataset paths from arguments if provided
+    if args.video_dir is not None:
+        config['dataset']['video_dir'] = args.video_dir
+    if args.annotation_file is not None:
+        config['dataset']['annotation_file'] = args.annotation_file
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f'Using device: {device}')
 
