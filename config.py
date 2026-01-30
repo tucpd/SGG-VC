@@ -30,10 +30,9 @@ config = {
         "num_clips": 15
     },
     "dataset": {
-        "type": "msrvtt",  # Or "classroom" later
-        "train_list": "data/videos/train_list_new.txt",
-        "test_list": "data/videos/test_list_new.txt",
-        "video_dir": "data/videos"
+        "type": "msrvtt",
+        "annotation_file": "data/annotations/train_val_videodatainfo.json",
+        "video_dir": "data/videos/all"
     },
     "training": {
         "batch_size": 8,

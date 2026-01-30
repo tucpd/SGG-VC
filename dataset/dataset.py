@@ -3,30 +3,44 @@ from torch.utils.data import Dataset
 import cv2
 import random
 import os
+import json
 import numpy as np
 
 class VideoDataset(Dataset):
-    def __init__(self, list_file, video_dir, num_clips=15, frames_per_clip=16, is_train=True):
+    def __init__(self, annotation_file, video_dir, split='train', num_clips=15, frames_per_clip=16, is_train=True):
         """
-        list_file: Path den train_list.txt hoac test_list.txt (format: video_path\tcaption1;caption2;... cho MSRVTT)
-        video_dir: Thu muc chua videos (e.g., path/to/msrvtt_videos)
+        annotation_file: Path den file JSON annotation (train_val_videodatainfo.json)
+        video_dir: Thu muc chua videos (e.g., data/videos/all)
+        split: 'train' hoac 'val' de filter du lieu
         is_train: True cho train (random 1 caption), False cho val/test (all captions)
         """
-
         self.video_data = []
-        with open(list_file, 'r', encoding='utf-8') as f:
-            for line in f:
-                parts = line.strip().split('\t')
-                if len(parts) < 2:
-                    continue
-                video_path = parts[0]
-                captions = parts[1].split(';') if len(parts) > 1 else []
-                self.video_data.append((video_path, captions))
-
         self.video_dir = video_dir
         self.num_clips = num_clips
         self.frames_per_clip = frames_per_clip
         self.is_train = is_train
+        
+        # Load JSON annotation
+        with open(annotation_file, 'r', encoding='utf-8') as f:
+            data = json.load(f)
+        
+        # Group captions by video_id and filter by split
+        video_captions = {}
+        for item in data.get('sentences', []):
+            if item.get('split') != split:
+                continue
+            video_id = item['video_id']
+            caption = item['caption'].strip()
+            if video_id not in video_captions:
+                video_captions[video_id] = []
+            video_captions[video_id].append(caption)
+        
+        # Convert to list format
+        for video_id, captions in video_captions.items():
+            video_path = f"{video_id}.mp4"
+            self.video_data.append((video_path, captions))
+        
+        print(f"Loaded {len(self.video_data)} videos for split '{split}'")
 
     def __len__(self):
         return len(self.video_data)
