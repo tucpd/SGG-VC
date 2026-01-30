@@ -185,3 +185,19 @@ data/
 .gitattributes
 .gitignore
 .gitmodules
+git_commands.txt
+checkpoints/
+# Large files - GloVe embeddings
+glove.6B.50d.txt
+glove.6B.100d.txt
+glove.6B.200d.txt
+glove.6B.200d
+glove.6B.200d.pt
+glove.6B.300d.txt
+*.cache
+
+# Checkpoint weights (large files)
+models/sgg/checkpoint/
+*.pth
+*.pt
+!models/sgg/checkpoint/.gitkeep
