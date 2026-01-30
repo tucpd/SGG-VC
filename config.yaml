@@ -1,0 +1,44 @@
+embed_dim: 1024
+
+proj_dims:
+  temporal_in: 768
+  object_in: 512
+  context_in: 512
+  out: 1024
+
+semantic_dim: 1024
+
+decoder_config:
+  num_query_tokens: 15
+  hidden_size: 1024
+  proj_out_dim: 1280
+  num_heads: 8
+  decoder_model_path: "deepseek-ai/deepseek-vl2-tiny"
+  use_fp16: true
+  num_beams: 5
+  max_new_tokens: 32
+
+sgg_config:
+  predictor: "REACTPredictor"
+  yolo_model: "models/sgg/checkpoint/yolov8m_vg150.pt"
+  config_file: "models/sgg/configs/VG150/react_yolov8m.yaml"
+  pretrained_ckpt: "models/sgg/checkpoint/react_PSG/best_model_epoch_11.pth"
+
+temporal_encoder_config:
+  num_layers: 4
+  num_heads: 8
+  embed_dim: 1024
+  num_clips: 15
+
+dataset:
+  type: "msrvtt"
+  train_list: "data/videos/train_list_new.txt"
+  test_list: "data/videos/test_list_new.txt"
+  video_dir: "data/videos/all"
+
+training:
+  batch_size: 4
+  lr: 0.00001
+  num_epochs: 10
+  num_workers: 4
+  freeze_sgg: true
