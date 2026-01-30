@@ -16,6 +16,8 @@ class SGGClassCap(nn.Module):
         self.qformer = QFormer(config)
         self.caption_head = CaptionHead(config["decoder_config"])
         self.num_clips = config.get("temporal_encoder_config", {}).get("num_clips", 15)
+        # Batch processing requires large GPU (>24GB), default False for 16GB
+        self.use_batch_processing = config.get("use_batch_processing", False)
 
     def forward(self, video_clips_batch, keyframes_batch, caption_tokens_batch=None, mode='training'):
         """
@@ -26,21 +28,33 @@ class SGGClassCap(nn.Module):
         batch_size = len(video_clips_batch)
         all_scene_graphs_batch = []
         
-        for b_idx in range(batch_size):
-            video_clips = video_clips_batch[b_idx]
-            keyframes = keyframes_batch[b_idx]
-            
-            scene_graphs_per_video = []
-            for clip_idx in range(self.num_clips):
-                clip = video_clips[clip_idx] if video_clips.dim() == 5 else video_clips
-                keyframe = keyframes[clip_idx] if keyframes.dim() == 4 else keyframes
+        if self.use_batch_processing:
+            # ============ BATCH PROCESSING MODE (requires >24GB GPU) ============
+            for b_idx in range(batch_size):
+                video_clips = video_clips_batch[b_idx]
+                keyframes = keyframes_batch[b_idx]
                 
-                motion_feats, enhanced_feats, obj_boxes = self.feature_extractor(clip, keyframe)
+                motion_feats_batch, enhanced_feats_list, obj_boxes_list = \
+                    self.feature_extractor.forward_batch_clips(video_clips, keyframes)
                 
-                sg_triples = self.sgg(keyframe, enhanced_feats)
-                scene_graphs_per_video.append(sg_triples)
-            
-            all_scene_graphs_batch.append(scene_graphs_per_video)
+                scene_graphs_per_video = self.sgg.forward_batch(keyframes, enhanced_feats_list)
+                all_scene_graphs_batch.append(scene_graphs_per_video)
+        else:
+            # ============ SEQUENTIAL MODE (default, works on 16GB GPU) ============
+            for b_idx in range(batch_size):
+                video_clips = video_clips_batch[b_idx]
+                keyframes = keyframes_batch[b_idx]
+                
+                scene_graphs_per_video = []
+                for clip_idx in range(self.num_clips):
+                    clip = video_clips[clip_idx] if video_clips.dim() == 5 else video_clips
+                    keyframe = keyframes[clip_idx] if keyframes.dim() == 4 else keyframes
+                    
+                    motion_feats, enhanced_feats, obj_boxes = self.feature_extractor(clip, keyframe)
+                    sg_triples = self.sgg(keyframe, enhanced_feats)
+                    scene_graphs_per_video.append(sg_triples)
+                
+                all_scene_graphs_batch.append(scene_graphs_per_video)
         
         temp_emb = self.temporal_encoder(all_scene_graphs_batch)
         visual_prompts = self.qformer(temp_emb)

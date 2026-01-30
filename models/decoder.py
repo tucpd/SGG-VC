@@ -79,10 +79,17 @@ class CaptionHead(nn.Module):
             prompt_embeds = self.lm_decoder.get_input_embeddings()(prompt_inputs["input_ids"])
             
             if isinstance(truth_caption, list) and isinstance(truth_caption[0], str):
+                # List of strings
                 caption_inputs = self.tokenizer(truth_caption, padding=True, truncation=True, return_tensors="pt").to(self.device)
                 caption_embeds = self.lm_decoder.get_input_embeddings()(caption_inputs["input_ids"])
                 truth_caption_ids = caption_inputs["input_ids"]
+            elif isinstance(truth_caption, list) and torch.is_tensor(truth_caption[0]):
+                # List of tensors - stack them
+                truth_caption = torch.stack(truth_caption, dim=0).to(self.device)
+                caption_embeds = self.lm_decoder.get_input_embeddings()(truth_caption)
+                truth_caption_ids = truth_caption
             else:
+                # Single tensor
                 caption_embeds = self.lm_decoder.get_input_embeddings()(truth_caption.to(self.device))
                 truth_caption_ids = truth_caption.to(self.device)
 

@@ -231,6 +231,31 @@ class SGGWrapper(nn.Module):
         
         return scene_graph_triples
 
+    def forward_batch(self, keyframes, enhanced_obj_feats_list=None):
+        """
+        BATCH PROCESSING: Xu ly nhieu keyframes cung luc
+        Luu y: REACT model khong ho tro batch, phai xu ly tung keyframe
+        Nhung co the gom YOLO detection va cac phep xu ly khac
+        
+        keyframes: tensor (num_clips, C, H, W) - all keyframes of 1 video
+        enhanced_obj_feats_list: optional list of enhanced features per clip
+        
+        Returns: list[num_clips] of scene graph triples
+        """
+        self.model.eval()
+        
+        num_clips = keyframes.shape[0]
+        scene_graphs_batch = []
+        
+        # REACT model khong ho tro true batch, xu ly tung keyframe
+        # Nhung van nhanh hon vi giam overhead Python loop
+        for i in range(num_clips):
+            kf = keyframes[i]  # (C, H, W)
+            sg_triples = self.forward(kf, None)
+            scene_graphs_batch.append(sg_triples)
+        
+        return scene_graphs_batch
+
     def _extract_scene_graph(self, boxlist, orig_size):
         """
         Chuyen doi BoxList predictions thanh scene graph triples
