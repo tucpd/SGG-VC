@@ -15,8 +15,9 @@ class FeatureExtractor(nn.Module):
         # YOLO khong nen la attribute cua nn.Module vi no ghi de train() method
         # Luu path de load YOLO khi can, dung global cache
         self._yolo_path = config["sgg_config"]["yolo_model"]
+        # Motion enhancement: obj_feats(512) + motion_in_box(768) + motion_around_box(768) = 2048
         self.motion_enhance = nn.Sequential(
-            nn.Linear(768 + 512 + 512, 1024),
+            nn.Linear(512 + 768 + 768, 1024),  # 2048 -> 1024
             nn.ReLU(),
             nn.LayerNorm(1024)
         )
@@ -33,6 +34,13 @@ class FeatureExtractor(nn.Module):
         clip_frames: (C, T=16, H, W) hoac (B, C, T, H, W)
         keyframe: (C, H, W) hoac (B, C, H, W)
         """
+        # Get device from model parameters
+        device = next(self.parameters()).device
+        
+        # Move inputs to correct device
+        clip_frames = clip_frames.to(device)
+        keyframe = keyframe.to(device)
+        
         # VideoMAE expects: (batch, num_frames, channels, height, width)
         # Input clip_frames: (C, T, H, W) -> need to convert
         if clip_frames.dim() == 4:

@@ -35,9 +35,10 @@ temporal_encoder_config:
 
 dataset:
   type: "msrvtt"
-  train_list: "data/videos/train_list_new.txt"
-  test_list: "data/videos/test_list_new.txt"
-  video_dir: "data/videos/all"
+  annotation_file: "data/annotations/train_val_videodatainfo.json"
+  video_dir: "data/videos"
+  num_clips: 15
+  frames_per_clip: 16
 
 training:
   batch_size: 4
@@ -45,3 +46,4 @@ training:
   num_epochs: 10
   num_workers: 4
   freeze_sgg: true
+  checkpoint_dir: "checkpoints/default"

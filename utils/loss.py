@@ -62,13 +62,19 @@ def temporal_consistency_loss(temporal_emb_seq, temperature=0.07):
     return pos_loss.mean()
 
 # Tổng loss trong training
-def total_loss(caption_logits, caption_targets, temporal_emb_seq=None, lambda_temporal=0.1):
+def total_loss(caption_logits, caption_targets, temporal_emb_seq=None, lambda_temporal=0.1, caption_loss_value=None):
     """
     Tổng hợp loss:
-    - caption_loss: chính
+    - caption_loss: chính (if caption_loss_value is provided, use it directly)
     - temporal_consistency_loss: auxiliary cho temporal encoder
+    
+    If caption_loss_value is provided (from CaptionHead's internal loss), use it directly.
+    Otherwise, compute caption_loss from logits and targets.
     """
-    ce_loss = caption_loss(caption_logits, caption_targets)
+    if caption_loss_value is not None:
+        ce_loss = caption_loss_value
+    else:
+        ce_loss = caption_loss(caption_logits, caption_targets)
     
     temp_loss = 0.0
     if temporal_emb_seq is not None:
