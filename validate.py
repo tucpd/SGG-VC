@@ -14,20 +14,22 @@ def validate_epoch(model, val_loader, device):
     all_res = {}
 
     with torch.no_grad():
-        for batch_idx, (clips, keyframes, caption_tokens_list) in enumerate(val_loader):
-            clips = [c.to(device) for c in clips]
-            keyframes = [k.to(device) for k in keyframes]
+        for batch_idx, (clips, keyframes, caption_lists) in enumerate(val_loader):
             
-            ce_loss, logits, _ = model(clips, keyframes, caption_tokens_list, mode='training')
+            ce_loss, logits, _ = model(clips, keyframes, caption_lists, mode='training')
             total_val_loss += ce_loss.item()
 
             generated_ids = model(clips, keyframes, mode='inference')
-            generated_captions = model.tokenizer.batch_decode(generated_ids, skip_special_tokens=True)
+            
+            from utils.caption_utils import get_tokenizer
+            tokenizer = get_tokenizer()
+            generated_captions = tokenizer.batch_decode(generated_ids, skip_special_tokens=True)
 
             for i, gen_cap in enumerate(generated_captions):
-                vid = f'vid_{batch_idx * val_loader.batch_size + i}'
-                refs = caption_tokens_list[i] if isinstance(caption_tokens_list[i], list) else [caption_tokens_list[i]]
-                ref_captions = [model.tokenizer.decode(ref, skip_special_tokens=True) for ref in refs]
+                vid = f'vid_{batch_idx * len(clips) + i}'
+                
+                refs = caption_lists[i] if isinstance(caption_lists[i], list) else [caption_lists[i]]
+                ref_captions = [str(ref) for ref in refs]
 
                 all_gts[vid] = ref_captions
                 all_res[vid] = [gen_cap]
