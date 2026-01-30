@@ -15,11 +15,17 @@ def caption_loss(logits, targets, ignore_index=-100, label_smoothing=0.1):
     """
     Standard cross-entropy with optional label smoothing.
     logits: (B, seq_len, vocab_size)
-    targets: (B, seq_len)
+    targets: list of caption strings or token tensors
     """
+    if isinstance(targets, list) and isinstance(targets[0], str):
+        from utils.caption_utils import get_tokenizer
+        tokenizer = get_tokenizer()
+        targets_encoded = tokenizer(targets, padding=True, truncation=True, return_tensors='pt')
+        targets = targets_encoded.input_ids.to(logits.device)
+    
     return F.cross_entropy(
-        logits.view(-1, logits.size(-1)),
-        targets.view(-1),
+        logits.reshape(-1, logits.size(-1)),
+        targets.reshape(-1),
         ignore_index=ignore_index,
         label_smoothing=label_smoothing
     )

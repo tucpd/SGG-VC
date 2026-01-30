@@ -24,8 +24,11 @@ def parse_args():
     return parser.parse_args()
 
 def load_config(config_path):
-    with open(config_path, 'r') as f:
-        config = yaml.safe_load(f)
+    if config_path.endswith('.yaml') or config_path.endswith('.yml'):
+        with open(config_path, 'r') as f:
+            config = yaml.safe_load(f)
+    else:
+        from config import config
     return config
 
 def main(args):
@@ -115,23 +118,20 @@ def main(args):
         train_loss = 0.0
         progress_bar = tqdm(train_loader, desc=f"Epoch {epoch+1}/{config['training']['num_epochs']}")
         
-        for clips, keyframes, caption_tokens in progress_bar:
+        for batch_idx, (clips, keyframes, captions) in enumerate(progress_bar):
             # clips: list[B] of (15, C, T=16, H, W)
-            # keyframes: list[B] of (C, H, W)
-            # caption_tokens: list[B] of tensor seq_len (hoặc padded tensor)
-            clips = [c.to(device) for c in clips]
-            keyframes = [k.to(device) for k in keyframes]
-            caption_tokens = [t.to(device) for t in caption_tokens]
-            # Foward
+            # keyframes: list[B] of (15, C, H, W)
+            # captions: list[B] of caption strings
+            
+            # Forward
             loss_ce, logits, temporal_emb_seq = model(
-                clips, keyframes, caption_tokens, mode='training'
+                clips, keyframes, captions, mode='training'
             )
             
-            # temporal_emb_seq: (B, num_clips, embed_dim) từ temporal_encoder
             # total loss
             loss = total_loss(
                 caption_logits=logits,
-                caption_targets=caption_tokens,
+                caption_targets=captions,
                 temporal_emb_seq=temporal_emb_seq,
                 lambda_temporal=0.1
             )
@@ -142,6 +142,7 @@ def main(args):
             optimizer.step()
 
             train_loss += loss.item()
+            progress_bar.set_postfix({'loss': loss.item()})
 
         avg_train_loss = train_loss / len(train_loader)
 

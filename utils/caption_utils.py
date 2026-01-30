@@ -1,15 +1,22 @@
 from transformers import AutoTokenizer
-from config import config
 
-# Load tokenizer globally
-tokenizer = AutoTokenizer.from_pretrained(config["decoder_config"]["decoder_model_path"])
+tokenizer = None
 
-# Hàm mã hóa text thành token ids với padding và max_length
-def get_caption_tokens(caption_text, max_length=30):
-    return tokenizer(
+def get_tokenizer(model_path="gpt2"):
+    global tokenizer
+    if tokenizer is None:
+        try:
+            tokenizer = AutoTokenizer.from_pretrained(model_path, trust_remote_code=True)
+        except:
+            tokenizer = AutoTokenizer.from_pretrained("gpt2")
+    return tokenizer
+
+def get_caption_tokens(caption_text, max_length=30, model_path="gpt2"):
+    tok = get_tokenizer(model_path)
+    return tok(
         caption_text, 
         max_length=max_length,
         padding='max_length',
         truncation=True,
         return_tensors='pt'
-    ).input_ids[0].tolist()
+    ).input_ids[0]
