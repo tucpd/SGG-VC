@@ -17,6 +17,7 @@ def parse_args():
     parser = argparse.ArgumentParser(description="SGG-ClassCap Training Script")
     parser.add_argument('--config', type=str, default='config.yaml', help='Path to config file')
     parser.add_argument('--batch_size', type=int, default=4, help='Batch size for training')
+    parser.add_argument('--epochs', type=int, default=4, help='Number of training epochs')
     parser.add_argument('--output_dir', type=str, default='./checkpoints', help='Where to save checkpoints')
     parser.add_argument('--resume', type=str, default=None, help='Path to resume checkpoint')
     parser.add_argument('--freeze_sgg', action='store_true', default=True, help='Freeze SGG module (YOLO + REACT)')
@@ -35,6 +36,8 @@ def main(args):
     config = load_config(args.config)
     if args.batch_size is not None:
         config['training']['batch_size'] = args.batch_size
+    if args.epochs is not None:
+        config['training']['epochs'] = args.epochs
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f'Using device: {device}')
 
@@ -77,15 +80,17 @@ def main(args):
         
     # 2. Load dataset
     train_dataset = VideoDataset(
-        list_file=config['dataset']['train_list'],
+        annotation_file=config['dataset']['annotation_file'],
         video_dir=config['dataset']['video_dir'],
+        split='train',
         num_clips=config.get('temporal_encoder_config', {}).get('num_clips', 15),
         is_train=True
     )
 
     val_dataset = VideoDataset(
-        list_file=config['dataset']['test_list'],
+        annotation_file=config['dataset']['annotation_file'],
         video_dir=config['dataset']['video_dir'],
+        split='val',
         num_clips=config.get('temporal_encoder_config', {}).get('num_clips', 15),
         is_train=False
     )
@@ -113,10 +118,10 @@ def main(args):
     history = []
 
     # 3. Training loop
-    for epoch in range(start_epoch, config['training']['num_epochs']):
+    for epoch in range(start_epoch, config['training']['epochs']):
         model.train()
         train_loss = 0.0
-        progress_bar = tqdm(train_loader, desc=f"Epoch {epoch+1}/{config['training']['num_epochs']}")
+        progress_bar = tqdm(train_loader, desc=f"Epoch {epoch+1}/{config['training']['epochs']}")
         
         for batch_idx, (clips, keyframes, captions) in enumerate(progress_bar):
             # clips: list[B] of (15, C, T=16, H, W)
