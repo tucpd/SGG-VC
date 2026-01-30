@@ -1,27 +1,57 @@
 import torch
 import torch.nn as nn
-from transformers import VideoMAEModel
+from transformers import VideoMAEModel, VideoMAEImageProcessor
 from ultralytics import YOLO
+
+# Global cache de luu YOLO model ngoai nn.Module hierarchy
+_YOLO_CACHE = {}
 
 class FeatureExtractor(nn.Module):
     def __init__(self, config):
         super().__init__()
         self.config = config
         self.videomae = VideoMAEModel.from_pretrained("MCG-NJU/videomae-base")
-        self.yolo = YOLO(config["sgg_config"]["yolo_model"])
+        self.processor = VideoMAEImageProcessor.from_pretrained("MCG-NJU/videomae-base")
+        # YOLO khong nen la attribute cua nn.Module vi no ghi de train() method
+        # Luu path de load YOLO khi can, dung global cache
+        self._yolo_path = config["sgg_config"]["yolo_model"]
         self.motion_enhance = nn.Sequential(
             nn.Linear(768 + 512 + 512, 1024),
             nn.ReLU(),
             nn.LayerNorm(1024)
         )
     
+    @property
+    def yolo(self):
+        """Lazy load YOLO tu global cache de tranh nn.Module hierarchy"""
+        if self._yolo_path not in _YOLO_CACHE:
+            _YOLO_CACHE[self._yolo_path] = YOLO(self._yolo_path)
+        return _YOLO_CACHE[self._yolo_path]
+    
     def forward(self, clip_frames, keyframe):
-        # Motion features from 16 frames/clip
-        # clip_frames: (C, T=16, H, W)
+        """
+        clip_frames: (C, T=16, H, W) hoac (B, C, T, H, W)
+        keyframe: (C, H, W) hoac (B, C, H, W)
+        """
+        # VideoMAE expects: (batch, num_frames, channels, height, width)
+        # Input clip_frames: (C, T, H, W) -> need to convert
         if clip_frames.dim() == 4:
-            clip_frames = clip_frames.unsqueeze(0)
-        motion_output = self.videomae(clip_frames)
-        motion_feats = motion_output.last_hidden_state.mean(dim=1)
+            # (C, T, H, W) -> (1, T, C, H, W)
+            clip_frames = clip_frames.permute(1, 0, 2, 3).unsqueeze(0)
+        elif clip_frames.dim() == 5 and clip_frames.shape[1] == 3:
+            # (B, C, T, H, W) -> (B, T, C, H, W)
+            clip_frames = clip_frames.permute(0, 2, 1, 3, 4)
+        
+        # Resize to 224x224 if needed (VideoMAE expects 224x224)
+        B, T, C, H, W = clip_frames.shape
+        if H != 224 or W != 224:
+            clip_frames = clip_frames.reshape(B * T, C, H, W)
+            clip_frames = torch.nn.functional.interpolate(clip_frames, size=(224, 224), mode='bilinear', align_corners=False)
+            clip_frames = clip_frames.reshape(B, T, C, 224, 224)
+        
+        # VideoMAE forward
+        motion_output = self.videomae(pixel_values=clip_frames)
+        motion_feats = motion_output.last_hidden_state.mean(dim=1)  # (B, 768)
 
         # Object detection on central keyframe
         if keyframe.dim() == 3:

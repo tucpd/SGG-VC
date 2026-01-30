@@ -164,6 +164,30 @@ class SGGWrapper(nn.Module):
         
         self.rel_conf = config.get("rel_conf", 0.1)
         self.box_conf = config.get("box_conf", 0.3)
+        
+        # Patch train method cua cac submodule co train() bi override boi ultralytics
+        self._patch_train_methods()
+    
+    def _patch_train_methods(self):
+        """Patch train() method cua cac submodule de tranh conflict voi ultralytics"""
+        from functools import partial
+        
+        def safe_train(module, mode=True):
+            """Safe train method that uses nn.Module.train directly"""
+            nn.Module.train(module, mode)
+            return module
+        
+        # Patch backbone train method
+        if hasattr(self.model, 'backbone'):
+            self.model.backbone.train = partial(safe_train, self.model.backbone)
+    
+    def train(self, mode=True):
+        """Override train() de khong anh huong den SGG model (luon eval)"""
+        # SGGWrapper luon o che do eval, chi train cac layer khac
+        super().train(mode)
+        # Giu SGG model o eval mode
+        self.model.eval()
+        return self
 
     def forward(self, keyframe, enhanced_obj_feats=None):
         """

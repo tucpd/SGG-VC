@@ -14,6 +14,7 @@ decoder_config:
   proj_out_dim: 1280
   num_heads: 8
   decoder_model_path: "deepseek-ai/deepseek-vl2-tiny"
+  lm_embed_dim: 1280  # DeepSeek-VL2-tiny hidden_size
   use_fp16: true
   num_beams: 5
   max_new_tokens: 32
