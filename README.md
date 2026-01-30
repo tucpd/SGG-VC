@@ -37,22 +37,65 @@ SGG-VC/
 └── README.md
 ```
 
-## 🛠️ Cài đặt (Installation)
+## 🛠️ Cai dat (Installation)
 
-1.  **Clone repository và submodules**:
-    ```bash
-    git clone --recursive [URL_CUA_BAN]
-    cd SGG-VC
-    ```
+### Yeu cau he thong
+- Python 3.10
+- CUDA 12.x
+- GPU VRAM >= 16GB (recommend 24GB for training)
 
-2.  **Cài đặt dependencies**:
-    ```bash
-    pip install -r requirements.txt
-    # Lưu ý: Cài đặt thêm các yêu cầu từ SGG-Benchmark nếu cần
-    ```
+### 1. Clone repository va submodules
+```bash
+git clone --recursive https://github.com/tucpd/SGG-VC.git
+cd SGG-VC
+```
 
-3.  **Tải Pretrained Weights**:
-    *   Tải YOLO và REACT checkpoints vào thư mục `models/sgg/checkpoint/` theo cấu hình trong `config.py`.
+### 2. Tao moi truong Conda
+```bash
+conda create -n svc python=3.10 -y
+conda activate svc
+```
+
+### 3. Cai dat PyTorch (CUDA 12.1)
+```bash
+pip install torch==2.1.0 torchvision==0.16.0 torchaudio==2.1.0 --index-url https://download.pytorch.org/whl/cu121
+```
+
+### 4. Cai dat dependencies
+```bash
+pip install -r requirements.txt
+
+# Cai dat pycocoevalcap tu git
+pip install git+https://github.com/salaniz/pycocoevalcap.git
+```
+
+### 5. Build SGG-Benchmark (CUDA extension)
+```bash
+cd models/sgg
+pip install -e .
+cd ../..
+```
+
+### 6. Tai Pretrained Weights va GloVe
+
+**GloVe Embeddings** (dat o thu muc goc):
+- Tai tu: https://nlp.stanford.edu/projects/glove/
+- File can thiet: `glove.6B.200d.txt` hoac `glove.6B.200d.pt`
+
+**REACT Checkpoint** (dat vao `models/sgg/checkpoint/react_VG150/`):
+- `best_model_epoch_9.pth` - REACT model weights
+- Tai tu: [Link checkpoint]
+
+**YOLOv8m VG150** (dat vao `models/sgg/checkpoint/`):
+- `yolov8m_vg150.pt` - YOLO backbone for VG150
+
+**Cau truc thu muc checkpoint:**
+```
+models/sgg/checkpoint/
+├── react_VG150/
+│   └── best_model_epoch_9.pth
+└── yolov8m_vg150.pt
+```
 
 ## ⚙️ Cấu hình (Configuration)
 
