@@ -131,3 +131,96 @@ def collate_fn(batch):
     captions_batch = [item[2] for item in batch]
 
     return clips_batch, keyframes_batch, captions_batch
+
+
+class CachedVideoDataset(Dataset):
+    """
+    Dataset that loads pre-extracted features from .pt files.
+    Use with scripts/extract_features.py to pre-compute features.
+    
+    This eliminates VideoMAE + SGG computation during training,
+    reducing training time by ~90%.
+    """
+    def __init__(self, annotation_file, feature_dir, split='train', num_clips=15, is_train=True):
+        """
+        annotation_file: Path to JSON annotation file
+        feature_dir: Directory containing pre-extracted .pt files
+        split: 'train' or 'val' to filter data
+        is_train: True for train (random 1 caption), False for val/test (all captions)
+        """
+        self.video_data = []
+        self.feature_dir = feature_dir
+        self.num_clips = num_clips
+        self.is_train = is_train
+        
+        # Load JSON annotation
+        with open(annotation_file, 'r', encoding='utf-8') as f:
+            data = json.load(f)
+        
+        # Group captions by video_id and filter by split
+        video_captions = {}
+        for item in data.get('sentences', []):
+            if item.get('split') != split:
+                continue
+            video_id = item['video_id']
+            caption = item['caption'].strip()
+            if video_id not in video_captions:
+                video_captions[video_id] = []
+            video_captions[video_id].append(caption)
+        
+        # Filter only videos that have pre-extracted features
+        missing_count = 0
+        for video_id, captions in video_captions.items():
+            feature_path = os.path.join(feature_dir, f'{video_id}.pt')
+            if os.path.exists(feature_path):
+                self.video_data.append((video_id, captions))
+            else:
+                missing_count += 1
+        
+        print(f"[CachedVideoDataset] Loaded {len(self.video_data)} videos for split '{split}'")
+        if missing_count > 0:
+            print(f"[CachedVideoDataset] Warning: {missing_count} videos missing features")
+
+    def __len__(self):
+        return len(self.video_data)
+    
+    def __getitem__(self, idx):
+        video_id, captions = self.video_data[idx]
+        feature_path = os.path.join(self.feature_dir, f'{video_id}.pt')
+        
+        try:
+            features = torch.load(feature_path, map_location='cpu')
+            scene_graphs = features['scene_graphs']
+            motion_feats = features['motion_feats']
+        except Exception as e:
+            print(f"Warning: Failed to load features for {video_id}: {e}")
+            return self._get_dummy_data(captions)
+        
+        # Handle captions
+        if self.is_train:
+            caption = random.choice(captions) if captions else ""
+            return scene_graphs, motion_feats, caption
+        else:
+            return scene_graphs, motion_feats, captions
+    
+    def _get_dummy_data(self, captions):
+        """Return dummy data when feature loading fails"""
+        # Create empty scene graphs (list of 15 empty lists)
+        scene_graphs = [[] for _ in range(self.num_clips)]
+        # Create zero motion features (15, 768)
+        motion_feats = torch.zeros(self.num_clips, 768)
+        
+        if self.is_train:
+            caption = captions[0] if captions else ""
+            return scene_graphs, motion_feats, caption
+        else:
+            return scene_graphs, motion_feats, captions
+
+
+def cached_collate_fn(batch):
+    """Collate function for CachedVideoDataset"""
+    scene_graphs_batch = [item[0] for item in batch]
+    motion_feats_batch = [item[1] for item in batch]
+    captions_batch = [item[2] for item in batch]
+    
+    return scene_graphs_batch, motion_feats_batch, captions_batch

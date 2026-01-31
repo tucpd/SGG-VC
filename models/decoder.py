@@ -75,7 +75,9 @@ class CaptionHead(nn.Module):
             assert truth_caption is not None
             B, T = q_feat_proj.shape[:2]
 
-            prompt_inputs = self.tokenizer([""] * B, return_tensors="pt", padding=True).to(self.device)
+            # Use same instruction prompt as inference for consistency
+            instruction = "Describe this video in one sentence:"
+            prompt_inputs = self.tokenizer([instruction] * B, return_tensors="pt", padding=True).to(self.device)
             prompt_embeds = self.lm_decoder.get_input_embeddings()(prompt_inputs["input_ids"])
             
             if isinstance(truth_caption, list) and isinstance(truth_caption[0], str):
@@ -120,9 +122,13 @@ class CaptionHead(nn.Module):
 
         elif mode == 'inference':
             B, T = q_feat_proj.shape[:2]
-            prompt_inputs = self.tokenizer([""] * B, return_tensors="pt", padding=True).to(self.device)
+            
+            # Use instruction prompt to guide caption generation
+            instruction = "Describe this video in one sentence:"
+            prompt_inputs = self.tokenizer([instruction] * B, return_tensors="pt", padding=True).to(self.device)
             prompt_embeds = self.lm_decoder.get_input_embeddings()(prompt_inputs["input_ids"])
 
+            # Visual features + instruction prompt
             combined_embeds = torch.cat([q_feat_proj.to(prompt_embeds.dtype), prompt_embeds], dim=1)
             attention_mask = torch.cat([
                 torch.ones((B, T), dtype=torch.long).to(self.device),
@@ -132,15 +138,13 @@ class CaptionHead(nn.Module):
             generated = self.lm_decoder.generate(
                 attention_mask=attention_mask,
                 inputs_embeds=combined_embeds,
-                do_sample=(inference_strategy == 'sampling'),
+                do_sample=False,
                 num_beams=self.config.get("num_beams", 5),
-                temperature=temperature if inference_strategy == 'sampling' else 1.0,
-                top_k=top_k if inference_strategy == 'sampling' else None,
-                top_p=top_p if inference_strategy == 'sampling' else None,
                 pad_token_id=self.tokenizer.pad_token_id if self.tokenizer.pad_token_id else self.tokenizer.eos_token_id,
-                bos_token_id=self.tokenizer.bos_token_id if hasattr(self.tokenizer, 'bos_token_id') else None,
                 eos_token_id=self.tokenizer.eos_token_id,
                 max_new_tokens=self.config.get("max_new_tokens", 32),
+                min_new_tokens=5,
+                repetition_penalty=1.2,
             )
             return generated
 

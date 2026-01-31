@@ -78,6 +78,12 @@ class TemporalSGEncoder(nn.Module):
                         obj_feat = triple['object']['feature']
                         pred_emb = triple['predicate']['embedding']
                         
+                        # Move to device (important for cached features loaded from CPU)
+                        device = self.get_device()
+                        subj_feat = subj_feat.to(device)
+                        obj_feat = obj_feat.to(device)
+                        pred_emb = pred_emb.to(device)
+                        
                         if subj_feat.dim() == 1:
                             subj_feat = subj_feat.unsqueeze(0)
                         if obj_feat.dim() == 1:

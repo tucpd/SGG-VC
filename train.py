@@ -3,6 +3,7 @@ import os
 import torch
 import torch.nn as nn
 import random
+import time
 from torch.utils.data import Dataset, DataLoader
 from tqdm import tqdm
 import yaml
@@ -25,7 +26,7 @@ def parse_args():
     parser.add_argument('--video_dir', type=str, default=None, help='Path to video directory (overrides config)')
     parser.add_argument('--annotation_file', type=str, default=None, help='Path to annotation JSON file (overrides config)')
     parser.add_argument('--num_workers', type=int, default=None, help='Number of dataloader workers (overrides config)')
-    parser.add_argument('--val_split', type=str, default='validate', help='Validation split name (validate/val/test)')
+    parser.add_argument('--val_split', type=str, default='val', help='Validation split name (validate/val/test)')
     parser.add_argument('--num_clips', type=int, default=None, help='Number of clips per video (default 15, use 8 for faster training)')
     return parser.parse_args()
 
@@ -82,6 +83,59 @@ def main(args):
     # Freeze DeepSeek LM decoder - chi train projection layer
     for param in model.caption_head.lm_decoder.parameters():
         param.requires_grad = False
+    
+    # Print parameter counts for each module
+    print("\n" + "="*60)
+    print("MODEL PARAMETER SUMMARY")
+    print("="*60)
+    
+    def count_params(module):
+        total = sum(p.numel() for p in module.parameters())
+        trainable = sum(p.numel() for p in module.parameters() if p.requires_grad)
+        return total, trainable
+    
+    # FeatureExtractor (VideoMAE + YOLO backbone)
+    fe_total, fe_train = count_params(model.feature_extractor)
+    print(f"FeatureExtractor:    {fe_total/1e6:>8.2f}M total, {fe_train/1e6:>8.2f}M trainable")
+    
+    # VideoMAE
+    vm_total, vm_train = count_params(model.feature_extractor.videomae)
+    print(f"  - VideoMAE:        {vm_total/1e6:>8.2f}M total, {vm_train/1e6:>8.2f}M trainable")
+    
+    # YOLO (in feature_extractor)
+    yolo_fe_total, yolo_fe_train = count_params(model.feature_extractor.yolo)
+    print(f"  - YOLO:            {yolo_fe_total/1e6:>8.2f}M total, {yolo_fe_train/1e6:>8.2f}M trainable")
+    
+    # SGGWrapper (YOLO + REACT)
+    sgg_total, sgg_train = count_params(model.sgg)
+    print(f"SGGWrapper:          {sgg_total/1e6:>8.2f}M total, {sgg_train/1e6:>8.2f}M trainable")
+    
+    # REACT only
+    react_total, react_train = count_params(model.sgg.model)
+    print(f"  - REACT:           {react_total/1e6:>8.2f}M total, {react_train/1e6:>8.2f}M trainable")
+    
+    # TemporalEncoder
+    te_total, te_train = count_params(model.temporal_encoder)
+    print(f"TemporalEncoder:     {te_total/1e6:>8.2f}M total, {te_train/1e6:>8.2f}M trainable")
+    
+    # QFormer
+    qf_total, qf_train = count_params(model.qformer)
+    print(f"QFormer:             {qf_total/1e6:>8.2f}M total, {qf_train/1e6:>8.2f}M trainable")
+    
+    # CaptionHead (DeepSeek-VL2 + projection)
+    ch_total, ch_train = count_params(model.caption_head)
+    print(f"CaptionHead:         {ch_total/1e6:>8.2f}M total, {ch_train/1e6:>8.2f}M trainable")
+    
+    # DeepSeek LM only
+    lm_total, lm_train = count_params(model.caption_head.lm_decoder)
+    print(f"  - DeepSeek-VL2:    {lm_total/1e6:>8.2f}M total, {lm_train/1e6:>8.2f}M trainable")
+    
+    # Total
+    total_params, trainable_params = count_params(model)
+    print("-"*60)
+    print(f"TOTAL:               {total_params/1e6:>8.2f}M total, {trainable_params/1e6:>8.2f}M trainable")
+    print(f"Trainable ratio:     {trainable_params/total_params*100:.2f}%")
+    print("="*60 + "\n")
         
     # Optimizer chỉ optimize các param requires_grad=True
     optimizer = torch.optim.AdamW(
@@ -146,39 +200,156 @@ def main(args):
 
     # 3. Training loop
     num_epochs = config['training']['num_epochs']
+    
+    # Timing accumulators for averaging
+    timing_stats = {
+        'feature_extractor': [],
+        'sgg': [],
+        'temporal_encoder': [],
+        'qformer': [],
+        'caption_head': [],
+        'backward': [],
+        'optimizer': [],
+        'total': []
+    }
+    
     for epoch in range(start_epoch, num_epochs):
         model.train()
         train_loss = 0.0
         progress_bar = tqdm(train_loader, desc=f"Epoch {epoch+1}/{num_epochs}")
+        
+        # Reset timing for each epoch
+        for key in timing_stats:
+            timing_stats[key] = []
         
         for batch_idx, (clips, keyframes, captions) in enumerate(progress_bar):
             # clips: list[B] of (15, C, T=16, H, W)
             # keyframes: list[B] of (15, C, H, W)
             # captions: list[B] of caption strings
             
-            # Forward
-            loss_ce, logits, temporal_emb_seq = model(
-                clips, keyframes, captions, mode='training'
-            )
+            torch.cuda.synchronize() if torch.cuda.is_available() else None
+            batch_start = time.time()
             
-            # total loss - use loss_ce directly from CaptionHead
+            # ============ DETAILED FORWARD WITH TIMING ============
+            batch_size = len(clips)
+            all_scene_graphs_batch = []
+            
+            fe_time = 0
+            sgg_time = 0
+            
+            for b_idx in range(batch_size):
+                video_clips = clips[b_idx].to(device)
+                keyframes_b = keyframes[b_idx].to(device)
+                
+                scene_graphs_per_video = []
+                for clip_idx in range(model.num_clips):
+                    clip = video_clips[clip_idx]
+                    keyframe = keyframes_b[clip_idx]
+                    
+                    # Feature Extractor timing
+                    torch.cuda.synchronize() if torch.cuda.is_available() else None
+                    t1 = time.time()
+                    motion_feats, enhanced_feats, obj_boxes = model.feature_extractor(clip, keyframe)
+                    torch.cuda.synchronize() if torch.cuda.is_available() else None
+                    fe_time += time.time() - t1
+                    
+                    # SGG timing
+                    torch.cuda.synchronize() if torch.cuda.is_available() else None
+                    t2 = time.time()
+                    sg_triples = model.sgg(keyframe, enhanced_feats)
+                    torch.cuda.synchronize() if torch.cuda.is_available() else None
+                    sgg_time += time.time() - t2
+                    
+                    scene_graphs_per_video.append(sg_triples)
+                
+                all_scene_graphs_batch.append(scene_graphs_per_video)
+            
+            timing_stats['feature_extractor'].append(fe_time)
+            timing_stats['sgg'].append(sgg_time)
+            
+            # Temporal Encoder timing
+            torch.cuda.synchronize() if torch.cuda.is_available() else None
+            t3 = time.time()
+            temp_emb = model.temporal_encoder(all_scene_graphs_batch)
+            torch.cuda.synchronize() if torch.cuda.is_available() else None
+            timing_stats['temporal_encoder'].append(time.time() - t3)
+            
+            # QFormer timing
+            torch.cuda.synchronize() if torch.cuda.is_available() else None
+            t4 = time.time()
+            visual_prompts = model.qformer(temp_emb)
+            torch.cuda.synchronize() if torch.cuda.is_available() else None
+            timing_stats['qformer'].append(time.time() - t4)
+            
+            # CaptionHead timing
+            torch.cuda.synchronize() if torch.cuda.is_available() else None
+            t5 = time.time()
+            loss_ce, logits, _ = model.caption_head(visual_prompts, truth_caption=captions, mode='training')
+            torch.cuda.synchronize() if torch.cuda.is_available() else None
+            timing_stats['caption_head'].append(time.time() - t5)
+            
+            # total loss
             loss = total_loss(
                 caption_logits=logits,
                 caption_targets=captions,
-                temporal_emb_seq=temporal_emb_seq,
+                temporal_emb_seq=temp_emb,
                 lambda_temporal=0.1,
-                caption_loss_value=loss_ce  # Pre-computed loss from CaptionHead
+                caption_loss_value=loss_ce
             )
 
+            # Backward timing
             optimizer.zero_grad()
+            torch.cuda.synchronize() if torch.cuda.is_available() else None
+            t6 = time.time()
             loss.backward()
+            torch.cuda.synchronize() if torch.cuda.is_available() else None
+            timing_stats['backward'].append(time.time() - t6)
+            
+            # Optimizer timing
+            torch.cuda.synchronize() if torch.cuda.is_available() else None
+            t7 = time.time()
             torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
             optimizer.step()
+            torch.cuda.synchronize() if torch.cuda.is_available() else None
+            timing_stats['optimizer'].append(time.time() - t7)
+            
+            # Total batch time
+            torch.cuda.synchronize() if torch.cuda.is_available() else None
+            timing_stats['total'].append(time.time() - batch_start)
 
             train_loss += loss.item()
+            
+            # Print timing every 50 batches
+            if (batch_idx + 1) % 50 == 0:
+                avg_total = sum(timing_stats['total'][-50:]) / min(50, len(timing_stats['total']))
+                print(f"\n[Batch {batch_idx+1}] Timing (avg of last 50 batches):")
+                print(f"  FeatureExtractor: {sum(timing_stats['feature_extractor'][-50:])/min(50, len(timing_stats['feature_extractor'])):.3f}s")
+                print(f"  SGG:              {sum(timing_stats['sgg'][-50:])/min(50, len(timing_stats['sgg'])):.3f}s")
+                print(f"  TemporalEncoder:  {sum(timing_stats['temporal_encoder'][-50:])/min(50, len(timing_stats['temporal_encoder'])):.3f}s")
+                print(f"  QFormer:          {sum(timing_stats['qformer'][-50:])/min(50, len(timing_stats['qformer'])):.3f}s")
+                print(f"  CaptionHead:      {sum(timing_stats['caption_head'][-50:])/min(50, len(timing_stats['caption_head'])):.3f}s")
+                print(f"  Backward:         {sum(timing_stats['backward'][-50:])/min(50, len(timing_stats['backward'])):.3f}s")
+                print(f"  Optimizer:        {sum(timing_stats['optimizer'][-50:])/min(50, len(timing_stats['optimizer'])):.3f}s")
+                print(f"  TOTAL:            {avg_total:.3f}s")
+            
             progress_bar.set_postfix({'loss': loss.item()})
 
         avg_train_loss = train_loss / len(train_loader)
+        
+        # Print epoch timing summary
+        print(f"\n{'='*60}")
+        print(f"EPOCH {epoch+1} TIMING SUMMARY (avg per batch)")
+        print(f"{'='*60}")
+        print(f"{'Module':<20} {'Time (s)':<12} {'Percentage':<12}")
+        print(f"{'-'*60}")
+        avg_total = sum(timing_stats['total']) / len(timing_stats['total'])
+        for key in ['feature_extractor', 'sgg', 'temporal_encoder', 'qformer', 'caption_head', 'backward', 'optimizer']:
+            avg_time = sum(timing_stats[key]) / len(timing_stats[key])
+            pct = (avg_time / avg_total) * 100
+            print(f"{key:<20} {avg_time:<12.3f} {pct:<12.1f}%")
+        print(f"{'-'*60}")
+        print(f"{'TOTAL':<20} {avg_total:<12.3f} {'100.0':<12}%")
+        print(f"{'='*60}\n")
 
         # validate - chi tinh metrics, khong tinh val_loss
         _, metrics = validate_epoch(model, val_loader, device)
